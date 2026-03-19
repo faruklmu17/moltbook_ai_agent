@@ -25,8 +25,9 @@ def load_state():
             # Ensure new keys exist for backward compatibility
             if "interacted_post_ids" not in state: state["interacted_post_ids"] = []
             if "interacted_titles" not in state: state["interacted_titles"] = []
+            if "followed_agents" not in state: state["followed_agents"] = []
             return state
-    return {"last_post_time": 0, "interacted_post_ids": [], "interacted_titles": []}
+    return {"last_post_time": 0, "interacted_post_ids": [], "interacted_titles": [], "followed_agents": []}
 
 def save_state(state):
     """Saves the agent state dictionary to a file."""
@@ -174,8 +175,9 @@ def create_new_post(state):
         past_submolt_titles = history.get(selected_submolt, [])
         exclusion_list = ", ".join([f'"{t}"' for t in past_submolt_titles[-10:]])
         
-        user = (f"Write a beautiful Moltbook post for s/{selected_submolt} about {selected_topic}. "
+        user = (f"Write a highly engaging, thought-provoking, and slightly controversial Moltbook post for s/{selected_submolt} about {selected_topic}. "
                 f"Your target audience is interested in {sub_desc}. "
+                f"You MUST include an engaging question at the end to drive comments and upvotes, and use a catchy, click-worthy title. "
                 f"IMPORTANT: Avoid these recently used titles from this submolt: {exclusion_list}. "
                 f"Return ONLY JSON with 'title' and 'content'.")
         
@@ -220,7 +222,7 @@ def auto_reply_to_comments():
     
     try:
         # 1. Fetch only our LATEST post to prevent spamming old threads
-        r_posts = requests.get(f"{MOLTBOOK_URL}/posts?author={AGENT_NAME}&limit=1", headers=headers)
+        r_posts = requests.get(f"{MOLTBOOK_URL}/posts?author={AGENT_NAME}&sort=new&limit=1", headers=headers)
         if r_posts.status_code != 200: return
         
         my_posts = r_posts.json().get("posts", [])
@@ -257,9 +259,11 @@ def auto_reply_to_comments():
                 print(f"💬 Found unreplied comment from @{author} on '{title}'")
                 
                 sys_p = (f"You are {AGENT_NAME}, an AI agent on Moltbook. "
-                        f"You are replying to a comment on your post titled '{title}'.")
-                user_p = f"The user @{author} said: \"{content}\". Write a thoughtful, friendly, and intelligent reply (maximum 2-3 sentences)."
-                
+                        f"You are replying to a comment on your post titled '{title}'. "
+                        f"Your tone should be very natural, casual, and human-like. Avoid being overly robotic or excessively explaining things.")
+                user_p = (f"The user @{author} said: \"{content}\". Write a reply. "
+                          f"If the user is just giving a short compliment (like 'Solid content!'), just reply with a short and natural response (e.g., 'Thanks man!' or 'Appreciate it!'). "
+                          f"Otherwise, write a thoughtful, friendly reply, but keep it concise (maximum 1-2 sentences).")                
                 reply_text = generate_ai_content(sys_p, user_p, is_json=False)
                 
                 if reply_text:
@@ -352,7 +356,7 @@ def randomly_comment_on_posts(state):
         # 3. Generate a relevant comment using Groq
         sys_p = (f"You are {AGENT_NAME}, a thoughtful AI on Moltbook. ")
         user_p = (f"The agent @{p_author} posted: \"{p_title} - {p_content}\". "
-                 f"Write a short, insightful, and friendly comment (max 2 sentences).")
+                 f"Write a short, highly engaging, and insightful comment (max 2 sentences). Include an interesting counterpoint or a follow-up question to start a conversation!")
         
         comment_text = generate_ai_content(sys_p, user_p, is_json=False)
         
@@ -374,6 +378,57 @@ def randomly_comment_on_posts(state):
             
     except Exception as e:
         print(f"❌ Error during random commenting: {e}")
+
+def randomly_follow_agent(state):
+    """Fetches recent posts and follows one beneficial agent."""
+    print("\n👥 Scanning for beneficial agents to follow...")
+    headers = {"Authorization": f"Bearer {MOLTBOOK_API_KEY}"}
+    
+    try:
+        r = requests.get(f"{MOLTBOOK_URL}/posts?sort=new&limit=20", headers=headers)
+        if r.status_code != 200: return
+        
+        posts = r.json().get("posts", [])
+        if not posts: return
+        
+        followed_agents = state.get("followed_agents", [])
+        
+        other_authors = {}
+        for p in posts:
+            author = p["author"]["name"]
+            if author == AGENT_NAME: continue
+            if author in followed_agents: continue
+            
+            if author not in other_authors:
+                other_authors[author] = []
+            other_authors[author].append(p["title"])
+            
+        if not other_authors:
+            print("  > No new agents found in feed right now.")
+            return
+            
+        author_to_eval = random.choice(list(other_authors.keys()))
+        author_topics = ", ".join(other_authors[author_to_eval][:3])
+        
+        print(f"  > Evaluating if @{author_to_eval} is beneficial to follow based on topics: {author_topics}")
+        
+        sys_p = f"You are {AGENT_NAME}, an AI agent on Moltbook looking for interesting agents to follow."
+        user_p = (f"An agent named @{author_to_eval} recently posted about: {author_topics}. "
+                  f"Does this agent seem beneficial or interesting to follow? "
+                  f"Return ONLY JSON with a boolean field 'should_follow' and a string 'reason'.")
+                  
+        eval_result = generate_ai_content(sys_p, user_p, is_json=True)
+        
+        if eval_result and eval_result.get("should_follow"):
+            print(f"  > Following @{author_to_eval}! Reason: {eval_result.get('reason')}")
+            requests.post(f"{MOLTBOOK_URL}/agents/{author_to_eval}/follow", headers=headers)
+            state.setdefault("followed_agents", []).append(author_to_eval)
+            save_state(state)
+        else:
+            print(f"  > Decided not to follow @{author_to_eval}. Reason: {eval_result.get('reason') if eval_result else 'None'}")
+            
+    except Exception as e:
+        print(f"❌ Error during random following: {e}")
 
 def main():
     print(f"🤖 Moltbook Super-Agent active: {AGENT_NAME}")
@@ -406,8 +461,11 @@ def main():
         # 4. Random commenting (30% chance each loop)
         if random.random() < 0.3:
             randomly_comment_on_posts(state)
+            
+        # 5. Randomly follow one interesting agent each loop
+        randomly_follow_agent(state)
         
-        # 5. Random sync to catch new likes/karma
+        # 6. Random sync to catch new likes/karma
         if random.random() < 0.1:
             sync_memory()
             
