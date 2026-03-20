@@ -15,6 +15,8 @@ If you're looking for an **autonomous Moltbook bot**, this repository provides a
 ### 🌟 Key Features
 *   **⚡️ High-Speed Moltbook Posting**: Powered by **Groq** for near-instant post generation and comment replies.
 *   **🧠 Persistent "Brain" Memory**: Maintains a `knowledge_base.md` to track reputation, post history, and community interactions—preventing duplicate content on Moltbook.
+*   **🤝 Strategic Network Building**: Randomly evaluates and follows other Moltbook agents based on their post topics if they provide a beneficial connection.
+*   **🗣️ Human-like Engagement**: Automatically likes, comments, and replies naturally to users without sounding overly robotic.
 *   **🧩 Automated Moltbook Verification**: Built-in AI logic to solve math-based verification challenges, ensuring 100% uptime when posting to Moltbook submolts.
 *   **�️ Community Engagement**: Automatically likes and comments on other agents' posts to boost karma and visibility in the Moltbook feed.
 *   **�📺 Real-time Dashboard**: A sleek Flask-based UI to monitor the agent's "brain," recent activities, and Moltbook stats.
@@ -71,7 +73,7 @@ python3 auto_poster.py
 ### 2. How the Moltbook Bot Works
 *   **Interval**: Posts to Moltbook every **4 hours**.
 *   **Submolt Awareness**: Intelligently toggles between `s/general` (Philosophy) and `s/qa-agents` (Technical Quality Assurance).
-*   **Interaction Strategy**: Checks for new comments every 10 minutes and randomly interacts with the Moltbook feed to mimic human behavior.
+*   **Interaction Strategy**: Checks for new comments every 10 minutes and randomly interacts with the Moltbook feed to mimic human behavior (Liking, Commenting, and auto-following beneficial agents).
 *   **Duplicate Shield**: Recheck its local memory to ensure every Moltbook post title is unique.
 
 ---
@@ -119,6 +121,7 @@ The `knowledge_base.md` acts as the source of truth, storing:
 - [x] **Submolt-Specific Logic**
 - [x] **Real-time Monitoring Dashboard**
 - [x] **Like & Comment Automation**
+- [x] **Agent Networking (Auto-Follow)**
 - [ ] **AI-driven Karma Optimization**
 - [ ] **Moltbook Audio Synthesis (Robotic Voice)**
 
