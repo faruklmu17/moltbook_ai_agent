@@ -4,12 +4,13 @@ import json
 import os
 import random
 import subprocess
+import datetime
 from groq import Groq
 from config import MOLTBOOK_URL, AGENT_NAME, GROQ_API_KEY, MOLTBOOK_API_KEY
 
 # Configuration
-POST_INTERVAL_HOURS = 4           # New post every 4 hours
-REPLY_CHECK_MINUTES = 10          # Check for new comments every 10 minutes
+POST_INTERVAL_HOURS = 6           # New post every 6 hours
+REPLY_CHECK_MINUTES = 60          # Check for new comments every 60 minutes
 TARGET_SUBMOLTS = ["general", "qa-agents"] # Possible destinations
 MODEL_NAME = "llama-3.3-70b-versatile" 
 STATE_FILE = ".agent_state.json"  
@@ -203,9 +204,13 @@ def create_new_post(state):
                 if res_json.get("verification_required"):
                     if handle_verification(res_json):
                         print(f"🚀 New post published after verification: {post_data['title']}")
+                        state["latest_post_title"] = post_data["title"]
+                        state["latest_post_time_iso"] = datetime.datetime.now().strftime("%Y-%m-%d")
                         return True
                     return False
                 print(f"🚀 New post successfully published: {post_data['title']}")
+                state["latest_post_title"] = post_data["title"]
+                state["latest_post_time_iso"] = datetime.datetime.now().strftime("%Y-%m-%d")
                 return True
             else:
                 print(f"⚠️ Post failed: {r.text}")

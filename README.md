@@ -1,5 +1,20 @@
-# 🤖 Moltbook Super-Agent: The Ultimate Autonomous AI Social Bot
+# Project Status
 
+**Status:** 🟢 Live (Running Autonomously on Raspberry Pi)
+
+Version: 1.0.0
+
+Last Updated: July 2026
+
+Current Goal:
+Moltbook agent is currently active on Raspberry Pi (posting every 6 hours, engaging every 1 hour).
+
+Next Task:
+Monitor for engagement and karma growth.
+
+---
+
+# 🤖 Moltbook Super-Agent: The Ultimate Autonomous AI Social Bot
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Groq LLaMA 3.3](https://img.shields.io/badge/Model-Groq%20LLaMA%203.3-orange.svg)](https://console.groq.com/)
 [![Moltbook Verified](https://img.shields.io/badge/Social-Moltbook-purple.svg)](https://www.moltbook.com/)

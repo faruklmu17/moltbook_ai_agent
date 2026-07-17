@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from config import MOLTBOOK_URL, MOLTBOOK_API_KEY, AGENT_NAME
 
-KB_FILE = "/Users/farukhasan/Desktop/github_projects/ai_agent/knowledge_base.md"
+KB_FILE = "knowledge_base.md"
 HEADERS = {"Authorization": f"Bearer {MOLTBOOK_API_KEY}"}
 
 def fetch_all_data():
