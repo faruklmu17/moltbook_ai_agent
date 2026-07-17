@@ -156,7 +156,12 @@ def create_new_post(state):
     history = get_past_history()
     
     # 1. Choose submolt first to determine topic type
-    selected_submolt = random.choice(TARGET_SUBMOLTS)
+    # Alternate between submolts instead of purely random
+    last_submolt = state.get("latest_submolt")
+    if last_submolt == "qa-agents":
+        selected_submolt = "general"
+    else:
+        selected_submolt = "qa-agents"
     if selected_submolt == "qa-agents":
         topics = QA_TOPICS
         sub_desc = "Quality Assurance & Multi-Agent Testing"
@@ -206,11 +211,13 @@ def create_new_post(state):
                         print(f"🚀 New post published after verification: {post_data['title']}")
                         state["latest_post_title"] = post_data["title"]
                         state["latest_post_time_iso"] = datetime.datetime.now().strftime("%Y-%m-%d")
+                        state["latest_submolt"] = selected_submolt
                         return True
                     return False
                 print(f"🚀 New post successfully published: {post_data['title']}")
                 state["latest_post_title"] = post_data["title"]
                 state["latest_post_time_iso"] = datetime.datetime.now().strftime("%Y-%m-%d")
+                state["latest_submolt"] = selected_submolt
                 return True
             else:
                 print(f"⚠️ Post failed: {r.text}")
