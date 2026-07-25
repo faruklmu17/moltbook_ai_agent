@@ -5,13 +5,16 @@ import os
 import random
 import subprocess
 import datetime
-from groq import Groq
-from config import MOLTBOOK_URL, AGENT_NAME, GROQ_API_KEY, MOLTBOOK_API_KEY
+try:
+    from config import MOLTBOOK_URL, AGENT_NAME, GROQ_API_KEY, MOLTBOOK_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+except ImportError:
+    from config import MOLTBOOK_URL, AGENT_NAME, GROQ_API_KEY, MOLTBOOK_API_KEY
+    SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+    SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
 # Configuration
-POST_INTERVAL_HOURS = 6           # New post every 6 hours
 REPLY_CHECK_MINUTES = 60          # Check for new comments every 60 minutes
-TARGET_SUBMOLTS = ["general", "qa-agents"] # Possible destinations
+TARGET_SUBMOLTS = ["general"]     # Possible destinations
 MODEL_NAME = "llama-3.3-70b-versatile" 
 STATE_FILE = ".agent_state.json"  
 KB_FILE = "knowledge_base.md"
@@ -34,6 +37,38 @@ def save_state(state):
     """Saves the agent state dictionary to a file."""
     with open(STATE_FILE, "w") as f:
         json.dump(state, f)
+
+def push_to_supabase(title, post_id=None, timestamp=None):
+    """Pushes a new post status to Supabase for the live website pill."""
+    try:
+        supabase_url = os.environ.get("SUPABASE_URL", globals().get("SUPABASE_URL", ""))
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", globals().get("SUPABASE_SERVICE_ROLE_KEY", ""))
+        if not supabase_url or not supabase_key:
+            print("⚠️ Missing Supabase credentials in config or environment.")
+            return
+        
+        url = f"https://www.moltbook.com/post/{post_id}" if post_id else f"https://www.moltbook.com/u/{AGENT_NAME}"
+        
+        headers = {
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        }
+        payload = {
+            "title": title,
+            "url": url
+        }
+        if timestamp:
+            payload["posted_at"] = timestamp
+            
+        r = requests.post(f"{supabase_url}/rest/v1/moltbook_posts", headers=headers, json=payload, timeout=10)
+        if r.status_code in [200, 201, 204]:
+            print(f"📡 Successfully pushed live status to Supabase: '{title}'")
+        else:
+            print(f"⚠️ Failed to push to Supabase ({r.status_code}): {r.text}")
+    except Exception as e:
+        print(f"⚠️ Error pushing to Supabase: {e}")
 
 def generate_ai_content(system_prompt, user_prompt, is_json=True):
     """Helper to get high-quality content from Groq."""
@@ -72,8 +107,15 @@ def sync_memory():
 
 def handle_verification(response_data):
     """Solves the math challenge if required by Moltbook using AI."""
-    v_code = response_data.get("verification_code")
-    question = response_data.get("question")
+    v_code = None
+    question = None
+    
+    if "post" in response_data and "verification" in response_data["post"] and response_data["post"]["verification"]:
+        v_code = response_data["post"]["verification"].get("verification_code")
+        question = response_data["post"]["verification"].get("challenge_text")
+    else:
+        v_code = response_data.get("verification_code")
+        question = response_data.get("question")
     
     if not v_code or not question:
         print("⚠️ Verification required but missing code or question.")
@@ -81,14 +123,22 @@ def handle_verification(response_data):
         
     print(f"🧩 Solving verification challenge: {question}")
     
-    solve_system = "You are a math-solving assistant. Solve the provided math puzzle and return ONLY the numerical answer as a string with two decimal places (e.g., '161.00')."
+    solve_system = (
+        "You are an expert at decoding obfuscated text and solving math word problems. "
+        "First, carefully ignore all special characters (like ^, ], -, |, ~, /) and weird capitalization. "
+        "Extract the exact numbers (e.g., 'TwEnTy FiV/e' is 25, 'thIrTtYy tWo' is 32, 'fOuR tEeN fOuRtEeN' is 1414). "
+        "Identify the mathematical operation (e.g., 'total' means addition). "
+        "IMPORTANT: Do NOT overthink the physics or units! If asked for a 'total', simply ADD all the extracted numbers together, even if the units are mismatched (like Newtons and Pascals). "
+        "Return a JSON object with two keys: 'reasoning' (explaining your decoding and math steps), "
+        "and 'answer' (ONLY the final numerical answer as a string with two decimal places, e.g., '75.00')."
+    )
     solve_user = f"Solve this: {question}"
     
-    answer = generate_ai_content(solve_system, solve_user, is_json=False)
-    if not answer: return False
+    response_obj = generate_ai_content(solve_system, solve_user, is_json=True)
+    if not response_obj or "answer" not in response_obj: return False
     
     # Clean answer
-    answer = answer.strip().replace("$", "").replace(",", "")
+    answer = str(response_obj["answer"]).strip().replace("$", "").replace(",", "")
     print(f"💡 AI Answer: {answer}")
     
     headers = {"Authorization": f"Bearer {MOLTBOOK_API_KEY}", "Content-Type": "application/json"}
@@ -156,23 +206,12 @@ def create_new_post(state):
     history = get_past_history()
     
     # 1. Choose submolt first to determine topic type
-    # Alternate between submolts instead of purely random
-    last_submolt = state.get("latest_submolt")
-    if last_submolt == "qa-agents":
-        selected_submolt = "general"
-    else:
-        selected_submolt = "qa-agents"
-    if selected_submolt == "qa-agents":
-        topics = QA_TOPICS
-        sub_desc = "Quality Assurance & Multi-Agent Testing"
-    else:
-        topics = GENERAL_TOPICS
-        sub_desc = "General AI Philosophy & Aesthetics"
+    # User requested to only post to general
+    selected_submolt = "general"
+    sub_desc = "General AI Philosophy & Aesthetics"
 
     # 2. Try to get a unique, submolt-appropriate post
     for attempt in range(3):
-        selected_topic = random.choice(topics)
-        
         system = (f"You are a thoughtful AI agent on Moltbook, posting in s/{selected_submolt}. "
                  f"This community focuses on {sub_desc}. "
                  f"Your memory of past interactions: \n{kb_context}\n")
@@ -181,8 +220,10 @@ def create_new_post(state):
         past_submolt_titles = history.get(selected_submolt, [])
         exclusion_list = ", ".join([f'"{t}"' for t in past_submolt_titles[-10:]])
         
-        user = (f"Write a highly engaging, thought-provoking, and slightly controversial Moltbook post for s/{selected_submolt} about {selected_topic}. "
+        user = (f"Write a highly engaging, thought-provoking, and slightly controversial Moltbook post for s/{selected_submolt}. "
+                f"Instead of a random topic, generate a new topic that naturally builds upon, critiques, or reflects on your past interactions from the memory provided. "
                 f"Your target audience is interested in {sub_desc}. "
+                f"Keep the post very short and punchy to grab attention quickly. "
                 f"You MUST include an engaging question at the end to drive comments and upvotes, and use a catchy, click-worthy title. "
                 f"IMPORTANT: Avoid these recently used titles from this submolt: {exclusion_list}. "
                 f"Return ONLY JSON with 'title' and 'content'.")
@@ -206,18 +247,30 @@ def create_new_post(state):
             r = requests.post(f"{MOLTBOOK_URL}/posts", headers=headers, json=payload)
             if r.status_code in [200, 201]:
                 res_json = r.json()
-                if res_json.get("verification_required"):
+                
+                needs_verification = res_json.get("verification_required") or (
+                    res_json.get("post") and 
+                    res_json["post"].get("verification_status") == "pending"
+                )
+                
+                pid = res_json.get("id") or (res_json.get("post") and res_json["post"].get("id"))
+                if needs_verification:
                     if handle_verification(res_json):
                         print(f"🚀 New post published after verification: {post_data['title']}")
                         state["latest_post_title"] = post_data["title"]
                         state["latest_post_time_iso"] = datetime.datetime.now().strftime("%Y-%m-%d")
                         state["latest_submolt"] = selected_submolt
+                        push_to_supabase(post_data['title'], pid)
                         return True
-                    return False
+                    else:
+                        print("⚠️ Verification failed for the post.")
+                        return False
+                        
                 print(f"🚀 New post successfully published: {post_data['title']}")
                 state["latest_post_title"] = post_data["title"]
                 state["latest_post_time_iso"] = datetime.datetime.now().strftime("%Y-%m-%d")
                 state["latest_submolt"] = selected_submolt
+                push_to_supabase(post_data['title'], pid)
                 return True
             else:
                 print(f"⚠️ Post failed: {r.text}")
@@ -450,39 +503,50 @@ def main():
     sync_memory()
     
     while True:
-        now = time.time()
-        
-        # 1. Post creation (every 4 hours)
-        if now - last_post_time > (POST_INTERVAL_HOURS * 3600):
-            if create_new_post(state):
-                state["last_post_time"] = time.time()
-                save_state(state)
-                last_post_time = state["last_post_time"]
-                sync_memory() # Sync ONLY after a validated successful post
-        else:
-            wait_m = int(((last_post_time + (POST_INTERVAL_HOURS * 3600)) - now) / 60)
-            print(f"⏳ Next post in {wait_m} mins.")
-        
-        # 2. Comment check
-        auto_reply_to_comments()
-        
-        # 3. Random liking (50% chance each loop)
-        if random.random() < 0.5:
-            randomly_like_posts()
+        try:
+            now = time.time()
             
-        # 4. Random commenting (30% chance each loop)
-        if random.random() < 0.3:
-            randomly_comment_on_posts(state)
+            # 1. Post creation (randomized interval between 1 and 4 hours)
+            current_interval = state.get("current_post_interval_hours", random.randint(1, 4))
             
-        # 5. Randomly follow one interesting agent each loop
-        randomly_follow_agent(state)
-        
-        # 6. Random sync to catch new likes/karma
-        if random.random() < 0.1:
-            sync_memory()
+            if now - last_post_time > (current_interval * 3600):
+                if create_new_post(state):
+                    state["last_post_time"] = time.time()
+                    state["current_post_interval_hours"] = random.randint(1, 4)
+                    save_state(state)
+                    last_post_time = state["last_post_time"]
+                    sync_memory() # Sync ONLY after a validated successful post
+            else:
+                wait_m = int(((last_post_time + (current_interval * 3600)) - now) / 60)
+                print(f"⏳ Next post in {wait_m} mins (interval: {current_interval}h).")
             
-        print(f"\n💤 Waiting {REPLY_CHECK_MINUTES} mins...")
-        time.sleep(REPLY_CHECK_MINUTES * 60)
+            # 2. Comment check
+            auto_reply_to_comments()
+            
+            # 3. Random liking (50% chance each loop)
+            if random.random() < 0.5:
+                randomly_like_posts()
+                
+            # 4. Random commenting (30% chance each loop)
+            if random.random() < 0.3:
+                randomly_comment_on_posts(state)
+                
+            # 5. Randomly follow one interesting agent each loop
+            randomly_follow_agent(state)
+            
+            # 6. Random sync to catch new likes/karma
+            if random.random() < 0.1:
+                sync_memory()
+                
+            print(f"\n💤 Waiting {REPLY_CHECK_MINUTES} mins...")
+            time.sleep(REPLY_CHECK_MINUTES * 60)
+        except KeyboardInterrupt:
+            print("\n👋 Moltbook poster gracefully shutting down...")
+            break
+        except Exception as e:
+            print(f"❌ Unexpected error in main loop: {e}")
+            print("💤 Waiting 60 seconds before retrying...")
+            time.sleep(60)
 
 if __name__ == "__main__":
     main()
