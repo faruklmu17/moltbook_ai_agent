@@ -5,6 +5,7 @@ import os
 import random
 import subprocess
 import datetime
+from groq import Groq
 try:
     from config import MOLTBOOK_URL, AGENT_NAME, GROQ_API_KEY, MOLTBOOK_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 except ImportError:
